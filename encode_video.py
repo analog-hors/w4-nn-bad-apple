@@ -1,7 +1,9 @@
+from typing import Iterator
 import random, json, torch, torch.nn
 from PIL import Image
 
-EPOCHS = 15_000
+EPOCHS = 10_000
+BATCH_SIZE = 256
 FRAME_WIDTH = 20
 FRAME_HEIGHT = 20
 FRAME_NUMS = 8
@@ -32,6 +34,15 @@ def make_dataset(frames: list[list[float]]) -> torch.Tensor:
     dataset = frames[:]
     random.shuffle(dataset)
     return torch.tensor(dataset, dtype=torch.float32, device=DEVICE)
+
+def iter_dataset(dataset: torch.Tensor) -> Iterator[torch.Tensor]:
+    total = dataset.shape[0]
+    index = 0
+    while index + BATCH_SIZE <= total:
+        yield dataset[index:index + BATCH_SIZE]
+        index += BATCH_SIZE
+    if index < total:
+        yield dataset[index:]
 
 class Encoder(torch.nn.Module):
     def __init__(self):
@@ -74,15 +85,21 @@ loss_fn = lambda o, t: torch.mean(torch.abs(o - t) ** 2.2)
 clipper = Clipper()
 
 for epoch in range(EPOCHS):
-    outputs = model(dataset)
-    loss = loss_fn(outputs, dataset)
+    epoch_loss = 0
+    for batch in iter_dataset(dataset):
+        outputs = model(batch)
+        loss = loss_fn(outputs, batch)
 
-    optim.zero_grad()
-    loss.backward()
-    optim.step()
-    model.decoder.apply(clipper)
+        optim.zero_grad()
+        loss.backward()
+        optim.step()
+        model.decoder.apply(clipper)
 
-    print(f"[{epoch + 1}/{EPOCHS}] loss: {loss.item()}")
+        epoch_loss += loss.item() * batch.shape[0]
+    print(f"[{epoch + 1}/{EPOCHS}] loss: {epoch_loss / dataset.shape[0]}")
+model.eval()
+
+print(f"final loss: {loss_fn(model(dataset), dataset).item()}")
 print(f"total parameters: {sum(p.numel() for p in model.decoder.parameters())}")
 
 with open("encoded_frames.bin", "wb+") as f:
