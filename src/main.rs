@@ -33,11 +33,11 @@ fn sigmoid(n: f32) -> f32 {
 }
 
 fn decode(input: &[f32; FRAME_NUMS]) -> [u8; FRAME_WIDTH * FRAME_HEIGHT] {
-    let input = linear(&input, &WEIGHT_0, &BIAS_0);
+    let input = linear(&input, &L0_WEIGHT, &L0_BIAS);
     let input = input.map(mish);
-    let input = linear(&input, &WEIGHT_2, &BIAS_2);
+    let input = linear(&input, &L1_WEIGHT, &L1_BIAS);
     let input = input.map(mish);
-    let input = linear(&input, &WEIGHT_4, &BIAS_4);
+    let input = linear(&input, &L2_WEIGHT, &L2_BIAS);
     input.map(|n| ((sigmoid(n) * 255.0).round() as i32).clamp(0, u8::MAX as i32) as u8)
 }
 
