@@ -2,6 +2,8 @@ import random, json, torch, torch.nn
 from PIL import Image
 
 EPOCHS = 15_000
+FRAME_WIDTH = 20
+FRAME_HEIGHT = 20
 FRAME_NUMS = 8
 WEIGHT_CLIP_RANGE = 0.5
 WEIGHT_QUANT_RANGE = 127
@@ -19,6 +21,7 @@ def load_frames() -> list[list[float]]:
         try:
             path = f"frames/{len(frames) + 1}.png"
             with Image.open(path) as frame:
+                assert frame.size == (FRAME_WIDTH, FRAME_HEIGHT)
                 raw = frame.convert("L").tobytes()
                 frames.append([b / 255 for b in raw])
         except FileNotFoundError:
@@ -35,7 +38,7 @@ class Encoder(torch.nn.Module):
         super().__init__()
 
         self.encoder = torch.nn.Sequential(
-            torch.nn.Linear(20 * 20, 1024),
+            torch.nn.Linear(FRAME_WIDTH * FRAME_HEIGHT, 1024),
             torch.nn.Mish(),
             torch.nn.Linear(1024, 512),
             torch.nn.Mish(),
@@ -48,7 +51,7 @@ class Encoder(torch.nn.Module):
             torch.nn.Mish(),
             torch.nn.Linear(128, 64),
             torch.nn.Mish(),
-            torch.nn.Linear(64, 20 * 20),
+            torch.nn.Linear(64, FRAME_WIDTH * FRAME_HEIGHT),
             torch.nn.Sigmoid(),
         )
 
@@ -105,6 +108,8 @@ def tensor_type(tensor: torch.Tensor, num_type: str) -> str:
     return tensor_type
 
 with open("decoder_nn.rs", "w+") as f:
+    f.write(f"const FRAME_WIDTH: usize = {FRAME_WIDTH};\n")
+    f.write(f"const FRAME_HEIGHT: usize = {FRAME_HEIGHT};\n")
     f.write(f"const FRAME_NUMS: usize = {FRAME_NUMS};\n")
     for name, tensor in model.decoder.cpu().state_dict().items():
         index, kind = name.split(".")

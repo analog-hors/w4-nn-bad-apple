@@ -32,7 +32,7 @@ fn sigmoid(n: f32) -> f32 {
     1.0 / (1.0 + (-n).exp())
 }
 
-fn decode(input: &[f32; FRAME_NUMS]) -> [u8; 20 * 20] {
+fn decode(input: &[f32; FRAME_NUMS]) -> [u8; FRAME_WIDTH * FRAME_HEIGHT] {
     let input = linear(&input, &WEIGHT_0, &BIAS_0);
     let input = input.map(mish);
     let input = linear(&input, &WEIGHT_2, &BIAS_2);
@@ -66,7 +66,7 @@ fn main() {
         };
 
         let frame = decode(&frame);
-        let image = image::GrayImage::from_raw(20, 20, frame.to_vec()).unwrap();
+        let image = image::GrayImage::from_raw(FRAME_WIDTH as u32, FRAME_HEIGHT as u32, frame.to_vec()).unwrap();
         image.save(format!("decoded/{}.png", i + 1)).unwrap();
     }
 }
