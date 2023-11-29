@@ -1,0 +1,6 @@
+/target
+bad_apple*
+frames/
+decoded/
+encoded_frames.bin
+decoder_nn.rs
