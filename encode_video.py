@@ -70,8 +70,7 @@ dataset = make_dataset(frames)
 
 model = Encoder().to(DEVICE)
 optim = torch.optim.Adam(model.parameters(), lr = 0.001)
-loss_fn = torch.nn.MSELoss()
-# loss_fn = lambda o, t: torch.mean(torch.abs(o - t) ** 2.2)
+loss_fn = lambda o, t: torch.mean(torch.abs(o - t) ** 2.2)
 clipper = Clipper()
 
 for epoch in range(EPOCHS):
