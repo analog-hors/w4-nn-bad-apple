@@ -1,1 +1,1 @@
-ffmpeg -i bad_apple.webm -vf scale=20:20 frames/%d.png
+ffmpeg -i bad_apple.webm -vf scale=40:30 frames/%d.png

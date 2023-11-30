@@ -20,6 +20,47 @@ fn linear<
     out
 }
 
+fn convtrans2d<
+    const IC: usize,
+    const OC: usize,
+    const IH: usize,
+    const IW: usize,
+    const OH: usize,
+    const OW: usize,
+    const K: usize,
+>(
+    input: &[[[f32; IW]; IH]; IC],
+    weight: &[[[[i8; K]; K]; OC]; IC],
+    bias: &[f32; OC]
+) -> [[[f32; OW]; OH]; OC] {
+    struct AssertOutputSize<const I: usize, const O: usize, const K: usize>;
+    impl<const I: usize, const O: usize, const K: usize> AssertOutputSize<I, O, K> {
+        const CORRECT: () = assert!(I + K - 1 == O);
+    }
+    let _ = AssertOutputSize::<IW, OW, K>::CORRECT;
+    let _ = AssertOutputSize::<IH, OH, K>::CORRECT;
+
+    let mut out = [[[0.0; OW]; OH]; OC];
+    for oc in 0..OC {
+        out[oc] = [[bias[oc]; OW]; OH];
+    }
+    for ic in 0..IC {
+        for oc in 0..OC {
+            for iy in 0..IH {
+                for ix in 0..IW {
+                    for ky in 0..K {
+                        for kx in 0..K {
+                            out[oc][iy + ky][ix + kx] += weight[ic][oc][ky][kx] as f32 / 127.0 * 0.5 * input[ic][iy][ix];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    out
+}
+
 fn softplus(n: f32) -> f32 {
     (1.0 + n.exp()).ln()
 }
@@ -32,12 +73,37 @@ fn sigmoid(n: f32) -> f32 {
     1.0 / (1.0 + (-n).exp())
 }
 
+fn activation<T: bytemuck::Pod>(f: impl Fn(f32) -> f32, v: T) -> T {
+    let mut v = [v];
+    for n in bytemuck::cast_slice_mut::<_, f32>(&mut v) {
+        *n = f(*n);
+    }
+    v[0]
+}
+
 fn decode(input: &[f32; FRAME_NUMS]) -> [u8; FRAME_WIDTH * FRAME_HEIGHT] {
     let input = linear(&input, &L0_WEIGHT, &L0_BIAS);
-    let input = input.map(mish);
-    let input = linear(&input, &L1_WEIGHT, &L1_BIAS);
-    let input = input.map(mish);
-    let input = linear(&input, &L2_WEIGHT, &L2_BIAS);
+    let input = activation(mish, input);
+    let input = convtrans2d::<
+        8,
+        16,
+        {FRAME_HEIGHT - 15 - 3},
+        {FRAME_WIDTH - 15 - 3},
+        {FRAME_HEIGHT - 15},
+        {FRAME_WIDTH - 15},
+        4,
+    >(bytemuck::cast_ref(&input), &L1_WEIGHT, &L1_BIAS);
+    let input = activation(mish, input);
+    let input = convtrans2d::<
+        16,
+        1,
+        {FRAME_HEIGHT - 15},
+        {FRAME_WIDTH - 15},
+        {FRAME_HEIGHT},
+        {FRAME_WIDTH},
+        16,
+    >(&input, &L2_WEIGHT, &L2_BIAS);
+    let input: [f32; FRAME_WIDTH * FRAME_HEIGHT] = bytemuck::cast(input);
     input.map(|n| ((sigmoid(n) * 255.0).round() as i32).clamp(0, u8::MAX as i32) as u8)
 }
 

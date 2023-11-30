@@ -2,5 +2,6 @@
 bad_apple*
 frames/
 decoded/
+logs/
 encoded_frames.bin
 decoder_nn.rs

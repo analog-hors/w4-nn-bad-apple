@@ -4,8 +4,8 @@ from PIL import Image
 
 EPOCHS = 10_000
 BATCH_SIZE = 256
-FRAME_WIDTH = 20
-FRAME_HEIGHT = 20
+FRAME_WIDTH = 40
+FRAME_HEIGHT = 30
 FRAME_NUMS = 8
 WEIGHT_CLIP_RANGE = 0.5
 WEIGHT_QUANT_RANGE = 127
@@ -47,17 +47,21 @@ def iter_dataset(dataset: torch.Tensor) -> Iterator[torch.Tensor]:
 class Decoder(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.l0 = torch.nn.Linear(FRAME_NUMS, 128)
-        self.l1 = torch.nn.Linear(128, 64)
-        self.l2 = torch.nn.Linear(64, FRAME_WIDTH * FRAME_HEIGHT)
+        self.l0 = torch.nn.Linear(FRAME_NUMS, 8 * (FRAME_HEIGHT - 3 - 15) * (FRAME_WIDTH - 3 - 15))
+        self.l1 = torch.nn.ConvTranspose2d(8, 16, 4)
+        self.l2 = torch.nn.ConvTranspose2d(16, 1, 16)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.l0(x)
         x = torch.nn.functional.mish(x)
+        
+        x = x.reshape((*x.shape[:-1], 8, FRAME_HEIGHT - 3 - 15, FRAME_WIDTH - 3 - 15))
         x = self.l1(x)
         x = torch.nn.functional.mish(x)
         x = self.l2(x)
         x = torch.nn.functional.sigmoid(x)
+
+        x = x.reshape((*x.shape[:-3], FRAME_HEIGHT * FRAME_WIDTH))
         return x
 
 class AutoEncoder(torch.nn.Module):
@@ -65,11 +69,11 @@ class AutoEncoder(torch.nn.Module):
         super().__init__()
 
         self.encoder = torch.nn.Sequential(
-            torch.nn.Linear(FRAME_WIDTH * FRAME_HEIGHT, 1024),
+            torch.nn.Linear(FRAME_WIDTH * FRAME_HEIGHT, 512),
             torch.nn.Mish(),
-            torch.nn.Linear(1024, 512),
+            torch.nn.Linear(512, 256),
             torch.nn.Mish(),
-            torch.nn.Linear(512, FRAME_NUMS),
+            torch.nn.Linear(256, FRAME_NUMS),
             torch.nn.Sigmoid(),
         )
 
@@ -92,6 +96,7 @@ model = AutoEncoder().to(DEVICE)
 optim = torch.optim.Adam(model.parameters(), lr = 0.001)
 loss_fn = lambda o, t: torch.mean(torch.abs(o - t) ** 2.2)
 clipper = Clipper()
+print(f"total parameters: {sum(p.numel() for p in model.decoder.parameters())}")
 
 for epoch in range(EPOCHS):
     epoch_loss = 0
@@ -105,7 +110,7 @@ for epoch in range(EPOCHS):
         model.decoder.apply(clipper)
 
         epoch_loss += loss.item() * batch.shape[0]
-    print(f"[{epoch + 1}/{EPOCHS}] loss: {epoch_loss / dataset.shape[0]}")
+    print(f"[{epoch + 1}/{EPOCHS}] loss: {epoch_loss / dataset.shape[0]}", flush=True)
 model.eval()
 
 print(f"final loss: {loss_fn(model(dataset), dataset).item()}")
