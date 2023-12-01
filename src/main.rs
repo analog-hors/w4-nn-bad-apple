@@ -103,7 +103,7 @@ impl<
     }
 }
 
-type L1Input = [[[f32; FRAME_WIDTH - 15 - 3]; FRAME_HEIGHT - 15 - 3]; 8];
+type L1Input = [[[f32; FRAME_WIDTH - 15 - 3]; FRAME_HEIGHT - 15 - 3]; 16];
 type L1Output = [[[f32; FRAME_WIDTH - 15]; FRAME_HEIGHT - 15]; 16];
 type L2Output = [[[f32; FRAME_WIDTH]; FRAME_HEIGHT]; 1];
 type NnOutput = [f32; FRAME_WIDTH * FRAME_HEIGHT];

@@ -4,9 +4,9 @@ from PIL import Image
 
 EPOCHS = 10_000
 BATCH_SIZE = 256
-FRAME_WIDTH = 40
-FRAME_HEIGHT = 30
-FRAME_NUMS = 8
+FRAME_WIDTH = 32
+FRAME_HEIGHT = 24
+FRAME_NUMS = 10
 WEIGHT_CLIP_RANGE = 0.5
 WEIGHT_QUANT_RANGE = 127.0
 FRAME_QUANT_RANGE = 255.0
@@ -47,15 +47,15 @@ def iter_dataset(dataset: torch.Tensor) -> Iterator[torch.Tensor]:
 class Decoder(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.l0 = torch.nn.Linear(FRAME_NUMS, 8 * (FRAME_HEIGHT - 3 - 15) * (FRAME_WIDTH - 3 - 15))
-        self.l1 = torch.nn.ConvTranspose2d(8, 16, 4)
+        self.l0 = torch.nn.Linear(FRAME_NUMS, 16 * (FRAME_HEIGHT - 3 - 15) * (FRAME_WIDTH - 3 - 15))
+        self.l1 = torch.nn.ConvTranspose2d(16, 16, 4)
         self.l2 = torch.nn.ConvTranspose2d(16, 1, 16)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.l0(x)
         x = torch.nn.functional.mish(x)
         
-        x = x.reshape((*x.shape[:-1], 8, FRAME_HEIGHT - 3 - 15, FRAME_WIDTH - 3 - 15))
+        x = x.reshape((*x.shape[:-1], 16, FRAME_HEIGHT - 3 - 15, FRAME_WIDTH - 3 - 15))
         x = self.l1(x)
         x = torch.nn.functional.mish(x)
         x = self.l2(x)
