@@ -8,8 +8,8 @@ FRAME_WIDTH = 40
 FRAME_HEIGHT = 30
 FRAME_NUMS = 8
 WEIGHT_CLIP_RANGE = 0.5
-WEIGHT_QUANT_RANGE = 127
-FRAME_QUANT_RANGE = 255
+WEIGHT_QUANT_RANGE = 127.0
+FRAME_QUANT_RANGE = 255.0
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -125,29 +125,58 @@ with open("encoded_frames.bin", "wb+") as f:
             byte = min(max(scaled, 0), FRAME_QUANT_RANGE)
             f.write(bytes([byte]))
 
-def quantize_weights(tensor: torch.Tensor):
-    if len(tensor.shape) == 0:
-        n = round(tensor.item() / WEIGHT_CLIP_RANGE * WEIGHT_QUANT_RANGE)
-        return min(max(n, -WEIGHT_QUANT_RANGE), WEIGHT_QUANT_RANGE)
-    return [quantize_weights(t) for t in tensor]
-
-def tensor_type(tensor: torch.Tensor, num_type: str) -> str:
-    tensor_type = num_type
-    for size in reversed(tensor.shape):
-        tensor_type = f"[{tensor_type}; {size}]"
-    return tensor_type
-
 with open("decoder_nn.rs", "w+") as f:
     f.write(f"const FRAME_WIDTH: usize = {FRAME_WIDTH};\n")
     f.write(f"const FRAME_HEIGHT: usize = {FRAME_HEIGHT};\n")
     f.write(f"const FRAME_NUMS: usize = {FRAME_NUMS};\n")
-    for param, tensor in model.decoder.cpu().state_dict().items():
-        name, kind = param.split(".")
-        name = name.upper()
-        if kind == "weight":
-            type = tensor_type(tensor, "i8")
-            quantized = quantize_weights(tensor)
-            f.write(f"static {name}_WEIGHT: {type} = {json.dumps(quantized)};\n")
-        else:
-            type = tensor_type(tensor, "f32")
-            f.write(f"static {name}_BIAS: {type} = {json.dumps(tensor.numpy().tolist())};\n")
+    f.write(f"const WEIGHT_CLIP_RANGE: f32 = {WEIGHT_CLIP_RANGE};\n")
+    f.write(f"const WEIGHT_QUANT_RANGE: f32 = {WEIGHT_QUANT_RANGE};\n")
+    f.write(f"const FRAME_QUANT_RANGE: f32 = {FRAME_QUANT_RANGE};\n")
+
+    def quantized_weights_str(tensor: torch.Tensor) -> str:
+        if len(tensor.shape) == 0:
+            n = round(tensor.item() / WEIGHT_CLIP_RANGE * WEIGHT_QUANT_RANGE)
+            n = min(max(n, -WEIGHT_QUANT_RANGE), WEIGHT_QUANT_RANGE)
+            return str(n)
+        return f"[{','.join(quantized_weights_str(t) for t in tensor)}]"
+
+    def float_tensor_str(tensor: torch.Tensor) -> str:
+        if len(tensor.shape) == 0:
+            return str(tensor.item())
+        return f"[{','.join(float_tensor_str(t) for t in tensor)}]"
+
+    def struct_str(name: str, fields: dict[str, str]) -> str:
+        fields_str = ",".join(f"{k}:{v}" for k, v in fields.items())
+        return f"{name}{{{fields_str}}}"
+
+    def type_str(name: str, args: list[int]) -> str:
+        return f"{name}<{','.join(str(a) for a in args)}>"
+
+    def write_linear(name: str, l: torch.nn.Linear):
+        struct = struct_str("Linear", {
+            "weight": quantized_weights_str(l.weight),
+            "bias": float_tensor_str(l.bias),
+        })
+        type = type_str("Linear", [
+            l.in_features,
+            l.out_features,
+        ])
+        f.write(f"static {name}: {type} = {struct};\n")
+
+    def write_convtrans2d(name: str, l: torch.nn.ConvTranspose2d):
+        struct = struct_str("ConvTrans2d", {
+            "weight": quantized_weights_str(l.weight),
+            "bias": float_tensor_str(l.bias),
+        })
+        type = type_str("ConvTrans2d", [
+            l.in_channels,
+            l.out_channels,
+            l.kernel_size[0],
+            l.kernel_size[1],
+        ])
+        f.write(f"static {name}: {type} = {struct};\n")
+
+    decoder = model.decoder.cpu()
+    write_linear("L0", decoder.l0)
+    write_convtrans2d("L1", decoder.l1)
+    write_convtrans2d("L2", decoder.l2)
