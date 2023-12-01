@@ -35,18 +35,23 @@ fn rescale_weight(w: i8) -> f32 {
     w as f32 / WEIGHT_QUANT_RANGE * WEIGHT_CLIP_RANGE
 }
 
+fn rescale_bias(b: i16) -> f32 {
+    b as f32 / BIAS_QUANT_RANGE * BIAS_CLIP_RANGE
+}
+
 struct Linear<const I: usize, const O: usize> {
     weight: [[i8; I]; O],
-    bias: [f32; O],
+    bias: [i16; O],
 }
 
 impl<const I: usize, const O: usize> Linear<I, O> {
     fn forward(&self, input: &[f32; I]) -> [f32; O] {
-        let mut out = self.bias.clone();
-        for (weight, n) in self.weight.iter().zip(&mut out) {
-            for (&w, i) in weight.iter().zip(input) {
-                *n += rescale_weight(w) * i;
+        let mut out = [0.0; O];
+        for o in 0..O {
+            for i in 0..I {
+                out[o] += rescale_weight(self.weight[o][i]) * input[i];
             }
+            out[o] += rescale_bias(self.bias[o]);
         }
         out
     }
@@ -59,7 +64,7 @@ struct ConvTrans2d<
     const KW: usize,
 > {
     weight: [[[[i8; KW]; KH]; OC]; IC],
-    bias: [f32; OC],
+    bias: [i16; OC],
 }
 
 impl<
@@ -83,7 +88,11 @@ impl<
 
         let mut out = [[[0.0; OW]; OH]; OC];
         for oc in 0..OC {
-            out[oc] = [[self.bias[oc]; OW]; OH];
+            for oy in 0..OH {
+                for ox in 0..OW {
+                    out[oc][oy][ox] = rescale_bias(self.bias[oc]);
+                }
+            }
         }
         for ic in 0..IC {
             for oc in 0..OC {
@@ -130,6 +139,12 @@ fn get_frame(i: usize) -> [f32; FRAME_NUMS] {
 }
 
 fn main() {
+    println!("video size: {}", FRAME_COUNT / KEYFRAME_INTERVAL * FRAME_NUMS);
+    println!("decoder size: {}",
+        std::mem::size_of_val(&L0)
+            + std::mem::size_of_val(&L1)
+            + std::mem::size_of_val(&L2)
+    );
     for i in 0..FRAME_COUNT {
         let frame = match i % KEYFRAME_INTERVAL {
             0 => get_frame(i),

@@ -1,5 +1,5 @@
 from typing import Iterator
-import random, json, torch
+import random, torch
 from PIL import Image
 
 EPOCHS = 10_000
@@ -7,9 +7,11 @@ BATCH_SIZE = 256
 FRAME_WIDTH = 32
 FRAME_HEIGHT = 24
 FRAME_NUMS = 10
+FRAME_QUANT_RANGE = 255.0
 WEIGHT_CLIP_RANGE = 0.5
 WEIGHT_QUANT_RANGE = 127.0
-FRAME_QUANT_RANGE = 255.0
+BIAS_CLIP_RANGE = 16.0
+BIAS_QUANT_RANGE = 32767.0
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -88,6 +90,10 @@ class Clipper:
             w = module.weight.data
             w = w.clamp(-WEIGHT_CLIP_RANGE, WEIGHT_CLIP_RANGE)
             module.weight.data = w
+        if hasattr(module, "bias"):
+            b = module.bias.data
+            b = b.clamp(-BIAS_CLIP_RANGE, BIAS_CLIP_RANGE)
+            module.bias.data = b
 
 frames = load_frames()
 dataset = make_dataset(frames)
@@ -129,21 +135,25 @@ with open("decoder_nn.rs", "w+") as f:
     f.write(f"const FRAME_WIDTH: usize = {FRAME_WIDTH};\n")
     f.write(f"const FRAME_HEIGHT: usize = {FRAME_HEIGHT};\n")
     f.write(f"const FRAME_NUMS: usize = {FRAME_NUMS};\n")
+    f.write(f"const FRAME_QUANT_RANGE: f32 = {FRAME_QUANT_RANGE};\n")
     f.write(f"const WEIGHT_CLIP_RANGE: f32 = {WEIGHT_CLIP_RANGE};\n")
     f.write(f"const WEIGHT_QUANT_RANGE: f32 = {WEIGHT_QUANT_RANGE};\n")
-    f.write(f"const FRAME_QUANT_RANGE: f32 = {FRAME_QUANT_RANGE};\n")
+    f.write(f"const BIAS_CLIP_RANGE: f32 = {BIAS_CLIP_RANGE};\n")
+    f.write(f"const BIAS_QUANT_RANGE: f32 = {BIAS_QUANT_RANGE};\n")
 
-    def quantized_weights_str(tensor: torch.Tensor) -> str:
+    def quantized_weight_str(tensor: torch.Tensor) -> str:
         if len(tensor.shape) == 0:
             n = round(tensor.item() / WEIGHT_CLIP_RANGE * WEIGHT_QUANT_RANGE)
             n = min(max(n, -WEIGHT_QUANT_RANGE), WEIGHT_QUANT_RANGE)
             return str(n)
-        return f"[{','.join(quantized_weights_str(t) for t in tensor)}]"
+        return f"[{','.join(quantized_weight_str(t) for t in tensor)}]"
 
-    def float_tensor_str(tensor: torch.Tensor) -> str:
+    def quantized_bias_str(tensor: torch.Tensor) -> str:
         if len(tensor.shape) == 0:
-            return str(tensor.item())
-        return f"[{','.join(float_tensor_str(t) for t in tensor)}]"
+            n = round(tensor.item() / BIAS_CLIP_RANGE * BIAS_QUANT_RANGE)
+            n = min(max(n, -BIAS_QUANT_RANGE), BIAS_QUANT_RANGE)
+            return str(n)
+        return f"[{','.join(quantized_bias_str(t) for t in tensor)}]"
 
     def struct_str(name: str, fields: dict[str, str]) -> str:
         fields_str = ",".join(f"{k}:{v}" for k, v in fields.items())
@@ -154,8 +164,8 @@ with open("decoder_nn.rs", "w+") as f:
 
     def write_linear(name: str, l: torch.nn.Linear):
         struct = struct_str("Linear", {
-            "weight": quantized_weights_str(l.weight),
-            "bias": float_tensor_str(l.bias),
+            "weight": quantized_weight_str(l.weight),
+            "bias": quantized_bias_str(l.bias),
         })
         type = type_str("Linear", [
             l.in_features,
@@ -165,8 +175,8 @@ with open("decoder_nn.rs", "w+") as f:
 
     def write_convtrans2d(name: str, l: torch.nn.ConvTranspose2d):
         struct = struct_str("ConvTrans2d", {
-            "weight": quantized_weights_str(l.weight),
-            "bias": float_tensor_str(l.bias),
+            "weight": quantized_weight_str(l.weight),
+            "bias": quantized_bias_str(l.bias),
         })
         type = type_str("ConvTrans2d", [
             l.in_channels,
