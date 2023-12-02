@@ -2,7 +2,7 @@ use bytemuck::Pod;
 
 include!("../decoder_nn.rs");
 static FRAMES: &[u8] = include_bytes!("../encoded_frames.bin");
-const KEYFRAME_INTERVAL: usize = 1;
+const KEYFRAME_INTERVAL: usize = 2;
 
 fn view<T: Pod, U: Pod>(t: &T) -> &U {
     bytemuck::cast_ref(t)
@@ -117,7 +117,7 @@ type L1Output = [[[f32; FRAME_WIDTH - 15]; FRAME_HEIGHT - 15]; 16];
 type L2Output = [[[f32; FRAME_WIDTH]; FRAME_HEIGHT]; 1];
 type NnOutput = [f32; FRAME_WIDTH * FRAME_HEIGHT];
 
-fn decode(input: &[f32; FRAME_NUMS]) -> [u8; FRAME_WIDTH * FRAME_HEIGHT] {
+fn decode(input: &[f32; EMBEDDING_DIMS]) -> [u8; FRAME_WIDTH * FRAME_HEIGHT] {
     let input = L0.forward(input);
     let input = map(mish, input);
     let input: &L1Input = view(&input);
@@ -129,17 +129,17 @@ fn decode(input: &[f32; FRAME_NUMS]) -> [u8; FRAME_WIDTH * FRAME_HEIGHT] {
     input.map(|n| ((n * 255.0).round() as i32).clamp(0, u8::MAX as i32) as u8)
 }
 
-static FRAME_COUNT: usize = FRAMES.len() / FRAME_NUMS;
+static FRAME_COUNT: usize = FRAMES.len() / EMBEDDING_DIMS;
 
-fn get_frame(i: usize) -> [f32; FRAME_NUMS] {
+fn get_frame(i: usize) -> [f32; EMBEDDING_DIMS] {
     let i = i.clamp(0, FRAME_COUNT - 1);
-    let frame = &FRAMES[i * FRAME_NUMS..i * FRAME_NUMS + FRAME_NUMS];
-    let frame: [u8; FRAME_NUMS] = frame.try_into().unwrap();
+    let frame = &FRAMES[i * EMBEDDING_DIMS..i * EMBEDDING_DIMS + EMBEDDING_DIMS];
+    let frame: [u8; EMBEDDING_DIMS] = frame.try_into().unwrap();
     frame.map(|n| n as f32 / FRAME_QUANT_RANGE)
 }
 
 fn main() {
-    println!("video size: {}", FRAME_COUNT / KEYFRAME_INTERVAL * FRAME_NUMS);
+    println!("video size: {}", FRAME_COUNT / KEYFRAME_INTERVAL * EMBEDDING_DIMS);
     println!("decoder size: {}",
         std::mem::size_of_val(&L0)
             + std::mem::size_of_val(&L1)

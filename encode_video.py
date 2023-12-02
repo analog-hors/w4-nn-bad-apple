@@ -7,7 +7,8 @@ BATCH_SIZE = 256
 FRAME_WIDTH = 32
 FRAME_HEIGHT = 24
 FRAME_STEP = 2
-FRAME_NUMS = 16
+FRAME_COUNT = 6572
+EMBEDDING_DIMS = 16
 FRAME_QUANT_RANGE = 255.0
 WEIGHT_CLIP_RANGE = 0.5
 WEIGHT_QUANT_RANGE = 127.0
@@ -22,35 +23,34 @@ random.seed(SEED)
 
 def load_frames() -> list[list[float]]:
     frames = []
-    while True:
-        try:
-            path = f"frames/{len(frames) * FRAME_STEP + 1}.png"
-            with Image.open(path) as frame:
-                assert frame.size == (FRAME_WIDTH, FRAME_HEIGHT)
-                raw = frame.convert("L").tobytes()
-                frames.append([b / 255 for b in raw])
-        except FileNotFoundError:
-            break
+    for i in range(0, FRAME_COUNT, FRAME_STEP):
+        with Image.open(f"frames/{i + 1}.png") as frame:
+            assert frame.size == (FRAME_WIDTH, FRAME_HEIGHT)
+            raw = frame.convert("L").tobytes()
+            frames.append([b / 255 for b in raw])
     return frames
 
-def make_dataset(frames: list[list[float]]) -> torch.Tensor:
-    dataset = frames[:]
+def make_dataset(frames: list[list[float]]) -> tuple[torch.Tensor, torch.Tensor]:
+    dataset = list(enumerate(frames))
     random.shuffle(dataset)
-    return torch.tensor(dataset, dtype=torch.float32, device=DEVICE)
+    indices = torch.tensor([i for i, _ in dataset], dtype=torch.long, device=DEVICE)
+    indices = torch.nn.functional.one_hot(indices, FRAME_COUNT // FRAME_STEP).float()
+    targets = torch.tensor([t for _, t in dataset], dtype=torch.float32, device=DEVICE)
+    return indices, targets
 
-def iter_dataset(dataset: torch.Tensor) -> Iterator[torch.Tensor]:
-    total = dataset.shape[0]
+def iter_dataset(inputs: torch.Tensor, targets: torch.Tensor) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+    total = inputs.shape[0]
     index = 0
     while index + BATCH_SIZE <= total:
-        yield dataset[index:index + BATCH_SIZE]
+        yield inputs[index:index + BATCH_SIZE], targets[index:index + BATCH_SIZE]
         index += BATCH_SIZE
     if index < total:
-        yield dataset[index:]
+        yield inputs[index:], targets[index:]
 
 class Decoder(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.l0 = torch.nn.Linear(FRAME_NUMS, 16 * (FRAME_HEIGHT - 3 - 15) * (FRAME_WIDTH - 3 - 15))
+        self.l0 = torch.nn.Linear(EMBEDDING_DIMS, 16 * (FRAME_HEIGHT - 3 - 15) * (FRAME_WIDTH - 3 - 15))
         self.l1 = torch.nn.ConvTranspose2d(16, 16, 4)
         self.l2 = torch.nn.ConvTranspose2d(16, 1, 16)
 
@@ -72,11 +72,9 @@ class AutoEncoder(torch.nn.Module):
         super().__init__()
 
         self.encoder = torch.nn.Sequential(
-            torch.nn.Linear(FRAME_WIDTH * FRAME_HEIGHT, 512),
+            torch.nn.Linear(FRAME_COUNT // FRAME_STEP, 512),
             torch.nn.Mish(),
-            torch.nn.Linear(512, 256),
-            torch.nn.Mish(),
-            torch.nn.Linear(256, FRAME_NUMS),
+            torch.nn.Linear(512, EMBEDDING_DIMS),
             torch.nn.Sigmoid(),
         )
 
@@ -96,8 +94,7 @@ class Clipper:
             b = b.clamp(-BIAS_CLIP_RANGE, BIAS_CLIP_RANGE)
             module.bias.data = b
 
-frames = load_frames()
-dataset = make_dataset(frames)
+inputs, targets = make_dataset(load_frames())
 
 model = AutoEncoder().to(DEVICE)
 optim = torch.optim.Adam(model.parameters(), lr = 0.001)
@@ -107,25 +104,26 @@ print(f"total parameters: {sum(p.numel() for p in model.decoder.parameters())}")
 
 for epoch in range(EPOCHS):
     epoch_loss = 0
-    for batch in iter_dataset(dataset):
-        outputs = model(batch)
-        loss = loss_fn(outputs, batch)
+    for (input, target) in iter_dataset(inputs, targets):
+        outputs = model(input)
+        loss = loss_fn(outputs, target)
 
         optim.zero_grad()
         loss.backward()
         optim.step()
         model.decoder.apply(clipper)
 
-        epoch_loss += loss.item() * batch.shape[0]
-    print(f"[{epoch + 1}/{EPOCHS}] loss: {epoch_loss / dataset.shape[0]}", flush=True)
+        epoch_loss += loss.item() * input.shape[0]
+    print(f"[{epoch + 1}/{EPOCHS}] loss: {epoch_loss / inputs.shape[0]}", flush=True)
 model.eval()
 
-print(f"final loss: {loss_fn(model(dataset), dataset).item()}")
+print(f"final loss: {loss_fn(model(inputs), targets).item()}")
 print(f"total parameters: {sum(p.numel() for p in model.decoder.parameters())}")
 
 with open("encoded_frames.bin", "wb+") as f:
-    frames_tensor = torch.tensor(frames, dtype=torch.float32, device=DEVICE)
-    encoded_frames = model.encoder(frames_tensor).cpu().detach().numpy().tolist()
+    indices = torch.arange(0, FRAME_COUNT // FRAME_STEP, device=DEVICE)
+    indices = torch.nn.functional.one_hot(indices, FRAME_COUNT // FRAME_STEP).float()
+    encoded_frames = model.encoder(indices).cpu().detach().numpy().tolist()
     for frame in encoded_frames:
         for n in frame:
             scaled = round(n * FRAME_QUANT_RANGE)
@@ -135,7 +133,7 @@ with open("encoded_frames.bin", "wb+") as f:
 with open("decoder_nn.rs", "w+") as f:
     f.write(f"const FRAME_WIDTH: usize = {FRAME_WIDTH};\n")
     f.write(f"const FRAME_HEIGHT: usize = {FRAME_HEIGHT};\n")
-    f.write(f"const FRAME_NUMS: usize = {FRAME_NUMS};\n")
+    f.write(f"const EMBEDDING_DIMS: usize = {EMBEDDING_DIMS};\n")
     f.write(f"const FRAME_QUANT_RANGE: f32 = {FRAME_QUANT_RANGE};\n")
     f.write(f"const WEIGHT_CLIP_RANGE: f32 = {WEIGHT_CLIP_RANGE};\n")
     f.write(f"const WEIGHT_QUANT_RANGE: f32 = {WEIGHT_QUANT_RANGE};\n")
