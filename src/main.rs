@@ -2,7 +2,7 @@ use bytemuck::Pod;
 
 include!("../decoder_nn.rs");
 static FRAMES: &[u8] = include_bytes!("../encoded_frames.bin");
-const KEYFRAME_INTERVAL: usize = 4;
+const KEYFRAME_INTERVAL: usize = 1;
 
 fn view<T: Pod, U: Pod>(t: &T) -> &U {
     bytemuck::cast_ref(t)
@@ -135,7 +135,7 @@ fn get_frame(i: usize) -> [f32; EMBEDDING_DIMS] {
     let i = i.clamp(0, FRAME_COUNT - 1);
     let frame = &FRAMES[i * EMBEDDING_DIMS..i * EMBEDDING_DIMS + EMBEDDING_DIMS];
     let frame: [u8; EMBEDDING_DIMS] = frame.try_into().unwrap();
-    frame.map(|n| n as f32 / FRAME_QUANT_RANGE)
+    frame.map(|n| n as i8 as f32 / FRAME_QUANT_RANGE * FRAME_CLIP_RANGE)
 }
 
 fn main() {

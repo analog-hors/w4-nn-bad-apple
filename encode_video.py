@@ -9,11 +9,12 @@ FRAME_HEIGHT = 24
 FRAME_STEP = 1
 FRAME_COUNT = 6572
 EMBEDDING_DIMS = 16
-FRAME_QUANT_RANGE = 255.0
+FRAME_QUANT_RANGE = 127
+FRAME_CLIP_RANGE = 1.0
 WEIGHT_CLIP_RANGE = 0.5
-WEIGHT_QUANT_RANGE = 127.0
+WEIGHT_QUANT_RANGE = 127
 BIAS_CLIP_RANGE = 16.0
-BIAS_QUANT_RANGE = 32767.0
+BIAS_QUANT_RANGE = 32767
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -75,7 +76,7 @@ class AutoEncoder(torch.nn.Module):
             torch.nn.Linear(FRAME_COUNT // FRAME_STEP, 512),
             torch.nn.Mish(),
             torch.nn.Linear(512, EMBEDDING_DIMS),
-            torch.nn.Sigmoid(),
+            torch.nn.Tanh(),
         )
 
         self.decoder = Decoder()
@@ -127,18 +128,19 @@ with open("encoded_frames.bin", "wb+") as f:
     for frame in encoded_frames:
         for n in frame:
             scaled = round(n * FRAME_QUANT_RANGE)
-            byte = min(max(scaled, 0), FRAME_QUANT_RANGE)
-            f.write(bytes([byte]))
+            byte = min(max(scaled, -FRAME_QUANT_RANGE), FRAME_QUANT_RANGE)
+            f.write(byte.to_bytes(signed=True))
 
 with open("decoder_nn.rs", "w+") as f:
     f.write(f"const FRAME_WIDTH: usize = {FRAME_WIDTH};\n")
     f.write(f"const FRAME_HEIGHT: usize = {FRAME_HEIGHT};\n")
     f.write(f"const EMBEDDING_DIMS: usize = {EMBEDDING_DIMS};\n")
-    f.write(f"const FRAME_QUANT_RANGE: f32 = {FRAME_QUANT_RANGE};\n")
+    f.write(f"const FRAME_CLIP_RANGE: f32 = {FRAME_CLIP_RANGE};\n")
+    f.write(f"const FRAME_QUANT_RANGE: f32 = {FRAME_QUANT_RANGE}.0;\n")
     f.write(f"const WEIGHT_CLIP_RANGE: f32 = {WEIGHT_CLIP_RANGE};\n")
-    f.write(f"const WEIGHT_QUANT_RANGE: f32 = {WEIGHT_QUANT_RANGE};\n")
+    f.write(f"const WEIGHT_QUANT_RANGE: f32 = {WEIGHT_QUANT_RANGE}.0;\n")
     f.write(f"const BIAS_CLIP_RANGE: f32 = {BIAS_CLIP_RANGE};\n")
-    f.write(f"const BIAS_QUANT_RANGE: f32 = {BIAS_QUANT_RANGE};\n")
+    f.write(f"const BIAS_QUANT_RANGE: f32 = {BIAS_QUANT_RANGE}.0;\n")
 
     def quantized_weight_str(tensor: torch.Tensor) -> str:
         if len(tensor.shape) == 0:
