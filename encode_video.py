@@ -6,7 +6,8 @@ EPOCHS = 10_000
 BATCH_SIZE = 256
 FRAME_WIDTH = 32
 FRAME_HEIGHT = 24
-FRAME_NUMS = 10
+FRAME_STEP = 2
+FRAME_NUMS = 16
 FRAME_QUANT_RANGE = 255.0
 WEIGHT_CLIP_RANGE = 0.5
 WEIGHT_QUANT_RANGE = 127.0
@@ -23,7 +24,7 @@ def load_frames() -> list[list[float]]:
     frames = []
     while True:
         try:
-            path = f"frames/{len(frames) + 1}.png"
+            path = f"frames/{len(frames) * FRAME_STEP + 1}.png"
             with Image.open(path) as frame:
                 assert frame.size == (FRAME_WIDTH, FRAME_HEIGHT)
                 raw = frame.convert("L").tobytes()
