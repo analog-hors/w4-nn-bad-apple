@@ -2,7 +2,7 @@ use bytemuck::Pod;
 
 include!("../decoder_nn.rs");
 static FRAMES: &[u8] = include_bytes!("../encoded_frames.bin");
-const KEYFRAME_INTERVAL: usize = 2;
+const KEYFRAME_INTERVAL: usize = 4;
 
 fn view<T: Pod, U: Pod>(t: &T) -> &U {
     bytemuck::cast_ref(t)
