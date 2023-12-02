@@ -10,7 +10,7 @@ FRAME_STEP = 1
 FRAME_COUNT = 6572
 EMBEDDING_DIMS = 16
 FRAME_QUANT_RANGE = 127
-FRAME_CLIP_RANGE = 1.0
+FRAME_CLIP_RANGE = 3.0
 WEIGHT_CLIP_RANGE = 0.5
 WEIGHT_QUANT_RANGE = 127
 BIAS_CLIP_RANGE = 16.0
@@ -56,6 +56,8 @@ class Decoder(torch.nn.Module):
         self.l2 = torch.nn.ConvTranspose2d(16, 1, 16)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = torch.nn.functional.tanh(x)
+
         x = self.l0(x)
         x = torch.nn.functional.mish(x)
         
@@ -72,35 +74,33 @@ class AutoEncoder(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.encoder = torch.nn.Sequential(
-            torch.nn.Linear(FRAME_COUNT // FRAME_STEP, 512),
-            torch.nn.Mish(),
-            torch.nn.Linear(512, EMBEDDING_DIMS),
-            torch.nn.Tanh(),
-        )
-
+        self.encoder = torch.nn.Linear(FRAME_COUNT // FRAME_STEP, EMBEDDING_DIMS, bias=False)
         self.decoder = Decoder()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.decoder(self.encoder(x))
 
-class Clipper:
-    def __call__(self, module):
-        if hasattr(module, "weight"):
-            w = module.weight.data
-            w = w.clamp(-WEIGHT_CLIP_RANGE, WEIGHT_CLIP_RANGE)
-            module.weight.data = w
-        if hasattr(module, "bias"):
-            b = module.bias.data
-            b = b.clamp(-BIAS_CLIP_RANGE, BIAS_CLIP_RANGE)
-            module.bias.data = b
+def encoder_clipper(module: torch.nn.Module):
+    if hasattr(module, "weight"):
+        w = module.weight.data
+        w = w.clamp(-FRAME_CLIP_RANGE, FRAME_CLIP_RANGE)
+        module.weight.data = w
+
+def decoder_clipper(module: torch.nn.Module):
+    if hasattr(module, "weight"):
+        w = module.weight.data
+        w = w.clamp(-WEIGHT_CLIP_RANGE, WEIGHT_CLIP_RANGE)
+        module.weight.data = w
+    if hasattr(module, "bias"):
+        b = module.bias.data
+        b = b.clamp(-BIAS_CLIP_RANGE, BIAS_CLIP_RANGE)
+        module.bias.data = b
 
 inputs, targets = make_dataset(load_frames())
 
 model = AutoEncoder().to(DEVICE)
 optim = torch.optim.Adam(model.parameters(), lr = 0.001)
 loss_fn = lambda o, t: torch.mean(torch.abs(o - t) ** 2.2)
-clipper = Clipper()
 print(f"total parameters: {sum(p.numel() for p in model.decoder.parameters())}")
 
 for epoch in range(EPOCHS):
@@ -112,7 +112,8 @@ for epoch in range(EPOCHS):
         optim.zero_grad()
         loss.backward()
         optim.step()
-        model.decoder.apply(clipper)
+        model.encoder.apply(encoder_clipper)
+        model.decoder.apply(decoder_clipper)
 
         epoch_loss += loss.item() * input.shape[0]
     print(f"[{epoch + 1}/{EPOCHS}] loss: {epoch_loss / inputs.shape[0]}", flush=True)
@@ -127,7 +128,7 @@ with open("encoded_frames.bin", "wb+") as f:
     encoded_frames = model.encoder(indices).cpu().detach().numpy().tolist()
     for frame in encoded_frames:
         for n in frame:
-            scaled = round(n * FRAME_QUANT_RANGE)
+            scaled = round(n / FRAME_CLIP_RANGE * FRAME_QUANT_RANGE)
             byte = min(max(scaled, -FRAME_QUANT_RANGE), FRAME_QUANT_RANGE)
             f.write(byte.to_bytes(signed=True))
 

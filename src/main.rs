@@ -2,7 +2,7 @@ use bytemuck::Pod;
 
 include!("../decoder_nn.rs");
 static FRAMES: &[u8] = include_bytes!("../encoded_frames.bin");
-const KEYFRAME_INTERVAL: usize = 1;
+const KEYFRAME_INTERVAL: usize = 4;
 
 fn view<T: Pod, U: Pod>(t: &T) -> &U {
     bytemuck::cast_ref(t)
@@ -117,8 +117,9 @@ type L1Output = [[[f32; FRAME_WIDTH - 15]; FRAME_HEIGHT - 15]; 16];
 type L2Output = [[[f32; FRAME_WIDTH]; FRAME_HEIGHT]; 1];
 type NnOutput = [f32; FRAME_WIDTH * FRAME_HEIGHT];
 
-fn decode(input: &[f32; EMBEDDING_DIMS]) -> [u8; FRAME_WIDTH * FRAME_HEIGHT] {
-    let input = L0.forward(input);
+fn decode(input: [f32; EMBEDDING_DIMS]) -> [u8; FRAME_WIDTH * FRAME_HEIGHT] {
+    let input = map(f32::tanh, input);
+    let input = L0.forward(&input);
     let input = map(mish, input);
     let input: &L1Input = view(&input);
     let input: L1Output = L1.forward(input);
@@ -159,7 +160,7 @@ fn main() {
             }
         };
 
-        let frame = decode(&frame);
+        let frame = decode(frame);
         let image = image::GrayImage::from_raw(FRAME_WIDTH as u32, FRAME_HEIGHT as u32, frame.to_vec()).unwrap();
         image.save(format!("decoded/{}.png", i + 1)).unwrap();
     }
