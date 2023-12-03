@@ -130,10 +130,10 @@ impl<'b, I: Pod> LayerBuffer<'b, I> {
         LayerBuffer { buffer: self.buffer, _phantom: std::marker::PhantomData }
     }
 
-    fn input(&mut self) -> &mut I {
+    fn finish(self) -> &'b I {
         let input_size = std::mem::size_of::<I>();
         let input = &mut self.buffer[..input_size];
-        &mut bytemuck::cast_slice_mut(input)[0]
+        &bytemuck::cast_slice(input)[0]
     }
 }
 
@@ -141,10 +141,10 @@ type L1Input = [[[f32; FRAME_WIDTH - 15 - 3]; FRAME_HEIGHT - 15 - 3]; 16];
 type L1Output = [[[f32; FRAME_WIDTH - 15]; FRAME_HEIGHT - 15]; 16];
 type L2Output = [[[f32; FRAME_WIDTH]; FRAME_HEIGHT]; 1];
 
-pub fn decoder(mut input: [f32; EMBEDDING_DIMS], buffer: &mut [u8; DECODER_BUFFER_SIZE]) -> [f32; FRAME_WIDTH * FRAME_HEIGHT] {
+pub fn decoder(mut input: [f32; EMBEDDING_DIMS], buffer: &mut [u8; DECODER_BUFFER_SIZE]) -> &[f32; FRAME_WIDTH * FRAME_HEIGHT] {
     apply(f32::tanh, &mut input);
 
-    let mut buffer = LayerBuffer::new(buffer, &input)
+    let output = LayerBuffer::new(buffer, &input)
         .layer(|input, output| {
             L0.forward(input, output);
             apply(mish, output);
@@ -157,9 +157,10 @@ pub fn decoder(mut input: [f32; EMBEDDING_DIMS], buffer: &mut [u8; DECODER_BUFFE
         .layer(|input, output: &mut L2Output| {
             L2.forward(&input, output);
             apply(sigmoid, output);
-        });
+        })
+        .finish();
     
-    *view(buffer.input())
+    view(output)
 }
 
 pub fn decoder_size() -> usize {

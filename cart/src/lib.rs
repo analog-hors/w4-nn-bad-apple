@@ -1,15 +1,16 @@
 const PALETTE: *mut [u32; 4] = 0x04 as _;
 const FRAMEBUFFER: *mut [u8; 6400] = 0xa0 as _;
+const BUFFER: *mut [u8; bad_apple::DECODER_BUFFER_SIZE] = 0xa0 as _;
 
 static mut INDEX: usize = 0;
 
 #[no_mangle]
 unsafe fn update() {
-    let mut buffer = [0; bad_apple::DECODER_BUFFER_SIZE];
-    let frame = bad_apple::get_frame(INDEX / 2, &mut buffer);
+    let frame = bad_apple::get_frame(INDEX / 2, &mut *BUFFER);
     INDEX = (INDEX + 1) % (bad_apple::FRAME_COUNT * 2);
 
     *PALETTE = [0x000000, 0x0D0D0D, 0xF2F2F2, 0xFFFFFF];
+    (*FRAMEBUFFER).fill(0);
     for fby in 0..120 {
         for fbx in 0..160 {
             let y = fby * bad_apple::FRAME_HEIGHT / 120;
