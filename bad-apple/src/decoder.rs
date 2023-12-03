@@ -42,10 +42,10 @@ pub struct Linear<const I: usize, const O: usize> {
 impl<const I: usize, const O: usize> Linear<I, O> {
     fn forward(&self, input: &[f32; I], output: &mut [f32; O]) {
         for o in 0..O {
+            output[o] = rescale_bias(self.bias[o]);
             for i in 0..I {
                 output[o] += rescale_weight(self.weight[o][i]) * input[i];
             }
-            output[o] += rescale_bias(self.bias[o]);
         }
     }
 }
