@@ -1,8 +1,5 @@
 use bytemuck::Pod;
 
-include!("../decoder_nn.rs");
-static FRAME_DATA: &[u8] = include_bytes!("../encoded_frames.bin");
-
 fn view<T: Pod, U: Pod>(t: &T) -> &U {
     bytemuck::cast_ref(t)
 }
@@ -38,7 +35,7 @@ fn rescale_bias(b: i16) -> f32 {
     b as f32 / BIAS_QUANT_RANGE * BIAS_CLIP_RANGE
 }
 
-struct Linear<const I: usize, const O: usize> {
+pub struct Linear<const I: usize, const O: usize> {
     weight: [[i8; I]; O],
     bias: [i16; O],
 }
@@ -56,7 +53,7 @@ impl<const I: usize, const O: usize> Linear<I, O> {
     }
 }
 
-struct ConvTrans2d<
+pub struct ConvTrans2d<
     const IC: usize,
     const OC: usize,
     const KH: usize,
@@ -111,12 +108,13 @@ impl<
     }
 }
 
+include!("../../decoder_nn.rs");
+
 type L1Input = [[[f32; FRAME_WIDTH - 15 - 3]; FRAME_HEIGHT - 15 - 3]; 16];
 type L1Output = [[[f32; FRAME_WIDTH - 15]; FRAME_HEIGHT - 15]; 16];
 type L2Output = [[[f32; FRAME_WIDTH]; FRAME_HEIGHT]; 1];
-type NnOutput = [f32; FRAME_WIDTH * FRAME_HEIGHT];
 
-fn decode(input: [f32; EMBEDDING_DIMS]) -> [u8; FRAME_WIDTH * FRAME_HEIGHT] {
+pub fn decoder(input: [f32; EMBEDDING_DIMS]) -> [f32; FRAME_WIDTH * FRAME_HEIGHT] {
     let input = map(f32::tanh, input);
     let input = L0.forward(&input);
     let input = map(mish, input);
@@ -125,43 +123,5 @@ fn decode(input: [f32; EMBEDDING_DIMS]) -> [u8; FRAME_WIDTH * FRAME_HEIGHT] {
     let input = map(mish, input);
     let input: L2Output = L2.forward(&input);
     let input = map(sigmoid, input);
-    let input: NnOutput = *view(&input);
-    input.map(|n| ((n * 255.0).round() as i32).clamp(0, u8::MAX as i32) as u8)
-}
-
-static FRAME_COUNT: usize = FRAME_DATA.len() / EMBEDDING_DIMS;
-
-fn get_keyframe(i: usize) -> [f32; EMBEDDING_DIMS] {
-    let i = i / KEYFRAME_INTERVAL;
-    let i = i.clamp(0, FRAME_COUNT - 1);
-    let frame = &FRAME_DATA[i * EMBEDDING_DIMS..i * EMBEDDING_DIMS + EMBEDDING_DIMS];
-    let frame: [u8; EMBEDDING_DIMS] = frame.try_into().unwrap();
-    frame.map(|n| n as i8 as f32 / FRAME_QUANT_RANGE * FRAME_CLIP_RANGE)
-}
-
-fn main() {
-    println!("video size: {}", FRAME_COUNT * EMBEDDING_DIMS);
-    println!("decoder size: {}",
-        std::mem::size_of_val(&L0)
-            + std::mem::size_of_val(&L1)
-            + std::mem::size_of_val(&L2)
-    );
-    for i in 0..FRAME_COUNT * KEYFRAME_INTERVAL {
-        let frame = match i % KEYFRAME_INTERVAL {
-            0 => get_keyframe(i),
-            progress => {
-                let mut frame = get_keyframe(i - progress);
-                let target = get_keyframe(i - progress + KEYFRAME_INTERVAL);
-                for (f, t) in frame.iter_mut().zip(target) {
-                    let p = progress as f32 / KEYFRAME_INTERVAL as f32;
-                    *f = *f * (1.0 - p) + t * p;
-                }
-                frame
-            }
-        };
-
-        let frame = decode(frame);
-        let image = image::GrayImage::from_raw(FRAME_WIDTH as u32, FRAME_HEIGHT as u32, frame.to_vec()).unwrap();
-        image.save(format!("decoded/{}.png", i + 1)).unwrap();
-    }
+    *view(&input)
 }

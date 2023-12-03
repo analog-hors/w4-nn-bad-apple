@@ -142,16 +142,16 @@ with open("encoded_frames.bin", "wb+") as f:
             f.write(byte.to_bytes(signed=True))
 
 with open("decoder_nn.rs", "w+") as f:
-    f.write(f"const FRAME_WIDTH: usize = {FRAME_WIDTH};\n")
-    f.write(f"const FRAME_HEIGHT: usize = {FRAME_HEIGHT};\n")
-    f.write(f"const KEYFRAME_INTERVAL: usize = {KEYFRAME_INTERVAL};\n")
-    f.write(f"const EMBEDDING_DIMS: usize = {EMBEDDING_DIMS};\n")
-    f.write(f"const FRAME_CLIP_RANGE: f32 = {FRAME_CLIP_RANGE};\n")
-    f.write(f"const FRAME_QUANT_RANGE: f32 = {FRAME_QUANT_RANGE}.0;\n")
-    f.write(f"const WEIGHT_CLIP_RANGE: f32 = {WEIGHT_CLIP_RANGE};\n")
-    f.write(f"const WEIGHT_QUANT_RANGE: f32 = {WEIGHT_QUANT_RANGE}.0;\n")
-    f.write(f"const BIAS_CLIP_RANGE: f32 = {BIAS_CLIP_RANGE};\n")
-    f.write(f"const BIAS_QUANT_RANGE: f32 = {BIAS_QUANT_RANGE}.0;\n")
+    f.write(f"pub const FRAME_WIDTH: usize = {FRAME_WIDTH};\n")
+    f.write(f"pub const FRAME_HEIGHT: usize = {FRAME_HEIGHT};\n")
+    f.write(f"pub const KEYFRAME_INTERVAL: usize = {KEYFRAME_INTERVAL};\n")
+    f.write(f"pub const EMBEDDING_DIMS: usize = {EMBEDDING_DIMS};\n")
+    f.write(f"pub const FRAME_CLIP_RANGE: f32 = {FRAME_CLIP_RANGE};\n")
+    f.write(f"pub const FRAME_QUANT_RANGE: f32 = {FRAME_QUANT_RANGE}.0;\n")
+    f.write(f"pub const WEIGHT_CLIP_RANGE: f32 = {WEIGHT_CLIP_RANGE};\n")
+    f.write(f"pub const WEIGHT_QUANT_RANGE: f32 = {WEIGHT_QUANT_RANGE}.0;\n")
+    f.write(f"pub const BIAS_CLIP_RANGE: f32 = {BIAS_CLIP_RANGE};\n")
+    f.write(f"pub const BIAS_QUANT_RANGE: f32 = {BIAS_QUANT_RANGE}.0;\n")
 
     def quantized_weight_str(tensor: torch.Tensor) -> str:
         if len(tensor.shape) == 0:
@@ -183,7 +183,7 @@ with open("decoder_nn.rs", "w+") as f:
             l.in_features,
             l.out_features,
         ])
-        f.write(f"static {name}: {type} = {struct};\n")
+        f.write(f"pub static {name}: {type} = {struct};\n")
 
     def write_convtrans2d(name: str, l: torch.nn.ConvTranspose2d):
         struct = struct_str("ConvTrans2d", {
@@ -196,7 +196,7 @@ with open("decoder_nn.rs", "w+") as f:
             l.kernel_size[0],
             l.kernel_size[1],
         ])
-        f.write(f"static {name}: {type} = {struct};\n")
+        f.write(f"pub static {name}: {type} = {struct};\n")
 
     decoder = model.decoder.cpu()
     write_linear("L0", decoder.l0)
