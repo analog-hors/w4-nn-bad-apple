@@ -2,5 +2,13 @@
 members = [
     "bad-apple",
     "write-frames",
+    "cart",
 ]
 resolver = "2"
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+panic = "abort"
+strip = true
