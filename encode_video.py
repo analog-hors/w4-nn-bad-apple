@@ -6,7 +6,7 @@ EPOCHS = 10_000
 BATCH_SIZE = 256
 FRAME_WIDTH = 32
 FRAME_HEIGHT = 24
-FRAME_STEP = 1
+KEYFRAME_INTERVAL = 4
 FRAME_COUNT = 6572
 EMBEDDING_DIMS = 16
 FRAME_QUANT_RANGE = 127
@@ -24,7 +24,7 @@ random.seed(SEED)
 
 def load_frames() -> list[list[float]]:
     frames = []
-    for i in range(0, FRAME_COUNT, FRAME_STEP):
+    for i in range(FRAME_COUNT):
         with Image.open(f"frames/{i + 1}.png") as frame:
             assert frame.size == (FRAME_WIDTH, FRAME_HEIGHT)
             raw = frame.convert("L").tobytes()
@@ -32,10 +32,19 @@ def load_frames() -> list[list[float]]:
     return frames
 
 def make_dataset(frames: list[list[float]]) -> tuple[torch.Tensor, torch.Tensor]:
-    dataset = list(enumerate(frames))
+    keyframes = torch.arange(FRAME_COUNT // KEYFRAME_INTERVAL, device=DEVICE)
+    keyframes = torch.nn.functional.one_hot(keyframes, FRAME_COUNT // KEYFRAME_INTERVAL).float()
+    inputs = []
+    for i in range(FRAME_COUNT // KEYFRAME_INTERVAL - 1):
+        for j in range(KEYFRAME_INTERVAL):
+            inter = torch.lerp(keyframes[i], keyframes[i + 1], j / KEYFRAME_INTERVAL)
+            inputs.append(inter.cpu().numpy())
+    inputs.append(keyframes[-1].cpu().numpy())
+
+    dataset = list(zip(inputs, frames))
     random.shuffle(dataset)
-    indices = torch.tensor([i for i, _ in dataset], dtype=torch.long, device=DEVICE)
-    indices = torch.nn.functional.one_hot(indices, FRAME_COUNT // FRAME_STEP).float()
+
+    indices = torch.tensor([i for i, _ in dataset], dtype=torch.float32, device=DEVICE)
     targets = torch.tensor([t for _, t in dataset], dtype=torch.float32, device=DEVICE)
     return indices, targets
 
@@ -74,7 +83,7 @@ class AutoEncoder(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.encoder = torch.nn.Linear(FRAME_COUNT // FRAME_STEP, EMBEDDING_DIMS, bias=False)
+        self.encoder = torch.nn.Linear(FRAME_COUNT // KEYFRAME_INTERVAL, EMBEDDING_DIMS, bias=False)
         self.decoder = Decoder()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -123,8 +132,8 @@ print(f"final loss: {loss_fn(model(inputs), targets).item()}")
 print(f"total parameters: {sum(p.numel() for p in model.decoder.parameters())}")
 
 with open("encoded_frames.bin", "wb+") as f:
-    indices = torch.arange(0, FRAME_COUNT // FRAME_STEP, device=DEVICE)
-    indices = torch.nn.functional.one_hot(indices, FRAME_COUNT // FRAME_STEP).float()
+    indices = torch.arange(0, FRAME_COUNT // KEYFRAME_INTERVAL, device=DEVICE)
+    indices = torch.nn.functional.one_hot(indices, FRAME_COUNT // KEYFRAME_INTERVAL).float()
     encoded_frames = model.encoder(indices).cpu().detach().numpy().tolist()
     for frame in encoded_frames:
         for n in frame:
@@ -135,6 +144,7 @@ with open("encoded_frames.bin", "wb+") as f:
 with open("decoder_nn.rs", "w+") as f:
     f.write(f"const FRAME_WIDTH: usize = {FRAME_WIDTH};\n")
     f.write(f"const FRAME_HEIGHT: usize = {FRAME_HEIGHT};\n")
+    f.write(f"const KEYFRAME_INTERVAL: usize = {KEYFRAME_INTERVAL};\n")
     f.write(f"const EMBEDDING_DIMS: usize = {EMBEDDING_DIMS};\n")
     f.write(f"const FRAME_CLIP_RANGE: f32 = {FRAME_CLIP_RANGE};\n")
     f.write(f"const FRAME_QUANT_RANGE: f32 = {FRAME_QUANT_RANGE}.0;\n")

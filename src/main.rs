@@ -1,8 +1,7 @@
 use bytemuck::Pod;
 
 include!("../decoder_nn.rs");
-static FRAMES: &[u8] = include_bytes!("../encoded_frames.bin");
-const KEYFRAME_INTERVAL: usize = 4;
+static FRAME_DATA: &[u8] = include_bytes!("../encoded_frames.bin");
 
 fn view<T: Pod, U: Pod>(t: &T) -> &U {
     bytemuck::cast_ref(t)
@@ -130,28 +129,29 @@ fn decode(input: [f32; EMBEDDING_DIMS]) -> [u8; FRAME_WIDTH * FRAME_HEIGHT] {
     input.map(|n| ((n * 255.0).round() as i32).clamp(0, u8::MAX as i32) as u8)
 }
 
-static FRAME_COUNT: usize = FRAMES.len() / EMBEDDING_DIMS;
+static FRAME_COUNT: usize = FRAME_DATA.len() / EMBEDDING_DIMS;
 
-fn get_frame(i: usize) -> [f32; EMBEDDING_DIMS] {
+fn get_keyframe(i: usize) -> [f32; EMBEDDING_DIMS] {
+    let i = i / KEYFRAME_INTERVAL;
     let i = i.clamp(0, FRAME_COUNT - 1);
-    let frame = &FRAMES[i * EMBEDDING_DIMS..i * EMBEDDING_DIMS + EMBEDDING_DIMS];
+    let frame = &FRAME_DATA[i * EMBEDDING_DIMS..i * EMBEDDING_DIMS + EMBEDDING_DIMS];
     let frame: [u8; EMBEDDING_DIMS] = frame.try_into().unwrap();
     frame.map(|n| n as i8 as f32 / FRAME_QUANT_RANGE * FRAME_CLIP_RANGE)
 }
 
 fn main() {
-    println!("video size: {}", FRAME_COUNT / KEYFRAME_INTERVAL * EMBEDDING_DIMS);
+    println!("video size: {}", FRAME_COUNT * EMBEDDING_DIMS);
     println!("decoder size: {}",
         std::mem::size_of_val(&L0)
             + std::mem::size_of_val(&L1)
             + std::mem::size_of_val(&L2)
     );
-    for i in 0..FRAME_COUNT {
+    for i in 0..FRAME_COUNT * KEYFRAME_INTERVAL {
         let frame = match i % KEYFRAME_INTERVAL {
-            0 => get_frame(i),
+            0 => get_keyframe(i),
             progress => {
-                let mut frame = get_frame(i - progress);
-                let target = get_frame(i - progress + KEYFRAME_INTERVAL);
+                let mut frame = get_keyframe(i - progress);
+                let target = get_keyframe(i - progress + KEYFRAME_INTERVAL);
                 for (f, t) in frame.iter_mut().zip(target) {
                     let p = progress as f32 / KEYFRAME_INTERVAL as f32;
                     *f = *f * (1.0 - p) + t * p;
