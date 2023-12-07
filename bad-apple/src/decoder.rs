@@ -1,4 +1,5 @@
 use bytemuck::Pod;
+use half::f16;
 
 fn view<T: Pod, U: Pod>(t: &T) -> &U {
     bytemuck::cast_ref(t)
@@ -8,9 +9,9 @@ fn view_flat_mut<T: Pod, U: Pod>(t: &mut T) -> &mut [U] {
     bytemuck::cast_slice_mut(std::slice::from_mut(t))
 }
 
-fn apply<T: Pod>(f: impl Fn(f32) -> f32, t: &mut T) {
-    for n in view_flat_mut(t) {
-        *n = f(*n);
+fn activation<T: Pod>(f: impl Fn(f32) -> f32, t: &mut T) {
+    for n in view_flat_mut::<_, f16>(t) {
+        *n = f16::from_f32(f(n.to_f32()));
     }
 }
 
@@ -26,12 +27,15 @@ fn sigmoid(n: f32) -> f32 {
     1.0 / (1.0 + (-n).exp())
 }
 
-fn rescale_weight(w: i8) -> f32 {
-    w as f32 / WEIGHT_QUANT_RANGE * WEIGHT_CLIP_RANGE
+fn apply_weight(w: i8, i: f16) -> f16 {
+    let w = w as f32 / WEIGHT_QUANT_RANGE * WEIGHT_CLIP_RANGE;
+    let i = f32::from(i);
+    f16::from_f32(w * i)
 }
 
-fn rescale_bias(b: i8) -> f32 {
-    b as f32 / BIAS_QUANT_RANGE * BIAS_CLIP_RANGE
+fn get_bias(b: i8) -> f16 {
+    let b = b as f32 / BIAS_QUANT_RANGE * BIAS_CLIP_RANGE;
+    f16::from_f32(b)
 }
 
 pub struct Linear<const I: usize, const O: usize> {
@@ -40,11 +44,11 @@ pub struct Linear<const I: usize, const O: usize> {
 }
 
 impl<const I: usize, const O: usize> Linear<I, O> {
-    fn forward(&self, input: &[f32; I], output: &mut [f32; O]) {
+    fn forward(&self, input: &[f16; I], output: &mut [f16; O]) {
         for o in 0..O {
-            output[o] = rescale_bias(self.bias[o]);
+            output[o] = get_bias(self.bias[o]);
             for i in 0..I {
-                output[o] += rescale_weight(self.weight[o][i]) * input[i];
+                output[o] += apply_weight(self.weight[o][i], input[i]);
             }
         }
     }
@@ -71,7 +75,7 @@ impl<
         const IW: usize,
         const OH: usize,
         const OW: usize,
-    >(&self, input: &[[[f32; IW]; IH]; IC], output: &mut [[[f32; OW]; OH]; OC]) {
+    >(&self, input: &[[[f16; IW]; IH]; IC], output: &mut [[[f16; OW]; OH]; OC]) {
         struct AssertOutputSize<const I: usize, const O: usize, const K: usize>;
         impl<const I: usize, const O: usize, const K: usize> AssertOutputSize<I, O, K> {
             const CORRECT: () = assert!(I + K - 1 == O);
@@ -82,7 +86,7 @@ impl<
         for oc in 0..OC {
             for oy in 0..OH {
                 for ox in 0..OW {
-                    output[oc][oy][ox] = rescale_bias(self.bias[oc]);
+                    output[oc][oy][ox] = get_bias(self.bias[oc]);
                 }
             }
         }
@@ -92,8 +96,10 @@ impl<
                     for ix in 0..IW {
                         for ky in 0..KH {
                             for kx in 0..KW {
-                                output[oc][iy + ky][ix + kx] +=
-                                    rescale_weight(self.weight[ic][oc][ky][kx]) * input[ic][iy][ix];
+                                output[oc][iy + ky][ix + kx] += apply_weight(
+                                    self.weight[ic][oc][ky][kx],
+                                    input[ic][iy][ix],
+                                );
                             }
                         }
                     }
@@ -137,26 +143,26 @@ impl<'b, I: Pod> LayerBuffer<'b, I> {
     }
 }
 
-type L1Input = [[[f32; FRAME_WIDTH - 15 - 3]; FRAME_HEIGHT - 15 - 3]; 16];
-type L1Output = [[[f32; FRAME_WIDTH - 15]; FRAME_HEIGHT - 15]; 16];
-type L2Output = [[[f32; FRAME_WIDTH]; FRAME_HEIGHT]; 1];
+type L1Input = [[[f16; FRAME_WIDTH - 15 - 3]; FRAME_HEIGHT - 15 - 3]; 16];
+type L1Output = [[[f16; FRAME_WIDTH - 15]; FRAME_HEIGHT - 15]; 16];
+type L2Output = [[[f16; FRAME_WIDTH]; FRAME_HEIGHT]; 1];
 
-pub fn decoder(mut input: [f32; EMBEDDING_DIMS], buffer: &mut [u8; DECODER_BUFFER_SIZE]) -> &[f32; FRAME_WIDTH * FRAME_HEIGHT] {
-    apply(f32::tanh, &mut input);
+pub fn decoder(mut input: [f16; EMBEDDING_DIMS], buffer: &mut [u8; DECODER_BUFFER_SIZE]) -> &[f16; FRAME_WIDTH * FRAME_HEIGHT] {
+    activation(f32::tanh, &mut input);
 
     let output = LayerBuffer::new(buffer, &input)
         .layer(|input, output| {
             L0.forward(input, output);
-            apply(mish, output);
+            activation(mish, output);
         })
         .layer(|input, output: &mut L1Output| {
             let input: &L1Input = view(input);
             L1.forward(input, output);
-            apply(mish, output);        
+            activation(mish, output);        
         })
         .layer(|input, output: &mut L2Output| {
-            L2.forward(&input, output);
-            apply(sigmoid, output);
+            L2.forward(input, output);
+            activation(sigmoid, output);
         })
         .finish();
     

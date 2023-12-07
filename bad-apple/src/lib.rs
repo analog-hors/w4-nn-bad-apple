@@ -28,5 +28,6 @@ fn get_frame_embedding(i: usize) -> [f32; EMBEDDING_DIMS] {
 }
 
 pub fn get_frame(i: usize, buffer: &mut [u8; DECODER_BUFFER_SIZE]) -> [u8; FRAME_WIDTH * FRAME_HEIGHT] {
-    decoder(get_frame_embedding(i), buffer).map(|n| (n * u8::MAX as f32).round() as u8)
+    let embedding = get_frame_embedding(i).map(half::f16::from_f32);
+    decoder(embedding, buffer).map(|n| (n.to_f32() * u8::MAX as f32).round() as u8)
 }

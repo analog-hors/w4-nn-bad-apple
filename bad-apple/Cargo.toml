@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 bytemuck = { version = "1.14.0", features = ["min_const_generics"] }
+half = { version = "2.3.1", features = ["bytemuck"] }
