@@ -4,11 +4,11 @@ from PIL import Image
 
 EPOCHS = 10_000
 BATCH_SIZE = 256
-FRAME_WIDTH = 32
-FRAME_HEIGHT = 24
+FRAME_WIDTH = 40
+FRAME_HEIGHT = 30
 KEYFRAME_INTERVAL = 8
 FRAME_COUNT = 6572
-EMBEDDING_DIMS = 16
+EMBEDDING_DIMS = 24
 FRAME_QUANT_RANGE = 127
 FRAME_CLIP_RANGE = 3.0
 WEIGHT_CLIP_RANGE = 0.5
@@ -60,9 +60,9 @@ def iter_dataset(inputs: torch.Tensor, targets: torch.Tensor) -> Iterator[tuple[
 class Decoder(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.l0 = torch.nn.Linear(EMBEDDING_DIMS, 16 * (FRAME_HEIGHT - 3 - 15) * (FRAME_WIDTH - 3 - 15))
-        self.l1 = torch.nn.ConvTranspose2d(16, 16, 4)
-        self.l2 = torch.nn.ConvTranspose2d(16, 1, 16)
+        self.l0 = torch.nn.Linear(EMBEDDING_DIMS, 4 * (FRAME_HEIGHT - 3 - 15) * (FRAME_WIDTH - 3 - 15))
+        self.l1 = torch.nn.ConvTranspose2d(4, 4, 4)
+        self.l2 = torch.nn.ConvTranspose2d(4, 1, 16)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = torch.nn.functional.tanh(x)
@@ -70,7 +70,7 @@ class Decoder(torch.nn.Module):
         x = self.l0(x)
         x = torch.nn.functional.mish(x)
         
-        x = x.reshape((*x.shape[:-1], 16, FRAME_HEIGHT - 3 - 15, FRAME_WIDTH - 3 - 15))
+        x = x.reshape((*x.shape[:-1], 4, FRAME_HEIGHT - 3 - 15, FRAME_WIDTH - 3 - 15))
         x = self.l1(x)
         x = torch.nn.functional.mish(x)
         x = self.l2(x)

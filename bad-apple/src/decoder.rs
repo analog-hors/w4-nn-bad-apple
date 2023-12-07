@@ -111,7 +111,7 @@ impl<
 
 include!("../../decoder_nn.rs");
 
-pub const DECODER_BUFFER_SIZE: usize = 3793 * 4;
+pub const DECODER_BUFFER_SIZE: usize = 2700 * std::mem::size_of::<f16>();
 
 struct LayerBuffer<'b, I: Pod> {
     buffer: &'b mut [u8],
@@ -143,8 +143,8 @@ impl<'b, I: Pod> LayerBuffer<'b, I> {
     }
 }
 
-type L1Input = [[[f16; FRAME_WIDTH - 15 - 3]; FRAME_HEIGHT - 15 - 3]; 16];
-type L1Output = [[[f16; FRAME_WIDTH - 15]; FRAME_HEIGHT - 15]; 16];
+type L1Input = [[[f16; FRAME_WIDTH - 15 - 3]; FRAME_HEIGHT - 15 - 3]; 4];
+type L1Output = [[[f16; FRAME_WIDTH - 15]; FRAME_HEIGHT - 15]; 4];
 type L2Output = [[[f16; FRAME_WIDTH]; FRAME_HEIGHT]; 1];
 
 pub fn decoder(mut input: [f16; EMBEDDING_DIMS], buffer: &mut [u8; DECODER_BUFFER_SIZE]) -> &[f16; FRAME_WIDTH * FRAME_HEIGHT] {
